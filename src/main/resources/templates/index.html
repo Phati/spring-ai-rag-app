@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spring AI RAG - Document Chat</title>
+    <link href="/webjars/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .hero-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 80px 0;
+            text-align: center;
+        }
+        .feature-card {
+            transition: transform 0.3s ease;
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+        }
+        .upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .upload-area:hover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        .upload-area.dragover {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        .document-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        .document-item:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .status-badge {
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+<!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+        <a class="navbar-brand" href="/">
+            <i class="fas fa-brain me-2"></i>Spring AI RAG
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="/">Home</a>
+            <a class="nav-link" href="/chat">Chat</a>
+            <a class="nav-link" href="/swagger-ui.html" target="_blank">API Docs</a>
+        </div>
+    </div>
+</nav>
+
+<!-- Hero Section -->
+<section class="hero-section">
+    <div class="container">
+        <h1 class="display-4 fw-bold mb-4">
+            <i class="fas fa-robot me-3"></i>AI-Powered Document Chat
+        </h1>
+        <p class="lead mb-4">Upload your PDF documents and chat with them using advanced AI technology</p>
+        <div class="row text-center mt-5">
+            <div class="col-md-4">
+                <h3 th:text="${documentCount}">0</h3>
+                <p>Documents Processed</p>
+            </div>
+            <div class="col-md-4">
+                <h3><i class="fas fa-brain"></i></h3>
+                <p>AI-Powered Responses</p>
+            </div>
+            <div class="col-md-4">
+                <h3><i class="fas fa-search"></i></h3>
+                <p>Semantic Search</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Main Content -->
+<div class="container my-5">
+    <div class="row">
+        <!-- Document Upload Section -->
+        <div class="col-lg-6 mb-4">
+            <div class="card feature-card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-upload me-2"></i>Upload Documents</h5>
+                </div>
+                <div class="card-body">
+                    <div class="upload-area" id="uploadArea">
+                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                        <h5>Drag & Drop PDF Files Here</h5>
+                        <p class="text-muted">or click to browse files</p>
+                        <input type="file" id="fileInput" accept=".pdf" multiple style="display: none;">
+                    </div>
+
+                    <div class="mt-3">
+                        <div class="row">
+                            <div class="col-6">
+                                <label for="chunkSize" class="form-label">Chunk Size</label>
+                                <input type="number" class="form-control" id="chunkSize" value="1000" min="100" max="5000">
+                            </div>
+                            <div class="col-6">
+                                <label for="chunkOverlap" class="form-label">Chunk Overlap</label>
+                                <input type="number" class="form-control" id="chunkOverlap" value="200" min="0" max="500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Progress -->
+                    <div id="uploadProgress" class="mt-3" style="display: none;">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <small class="text-muted mt-1 d-block">Uploading and processing document...</small>
+                    </div>
+
+                    <!-- Upload Results -->
+                    <div id="uploadResults" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="col-lg-6 mb-4">
+            <div class="card feature-card h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="fas fa-comments me-2"></i>Start Chatting</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-3">Ready to chat with your documents? Click below to open the interactive chat interface.</p>
+
+                    <div class="d-grid gap-2">
+                        <a href="/chat" class="btn btn-success btn-lg">
+                            <i class="fas fa-robot me-2"></i>Open Chat Interface
+                        </a>
+                    </div>
+
+                    <div class="mt-4">
+                        <h6>Quick Tips:</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-check text-success me-2"></i>Ask specific questions about your documents</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Request summaries or key points</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Compare information across documents</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Documents List -->
+    <div class="row mt-4" th:if="${documents != null and !documents.empty}">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>Your Documents</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6" th:each="doc : ${documents}">
+                            <div class="document-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <h6 class="mb-1" th:text="${doc.originalFilename}">Document Name</h6>
+                                        <small class="text-muted" th:text="${#dates.format(doc.createdAt, 'MMM dd, yyyy HH:mm')}">Upload Date</small>
+                                    </div>
+                                    <span class="badge status-badge"
+                                          th:classappend="${doc.status == 'COMPLETED'} ? 'bg-success' : (${doc.status == 'PROCESSING'} ? 'bg-warning' : 'bg-danger')"
+                                          th:text="${doc.status}">Status</span>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-file-pdf me-1"></i>
+                                        <span th:text="${#numbers.formatDecimal(doc.fileSize / 1024, 0, 0)}">0</span> KB
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="/webjars/jquery/jquery.min.js"></script>
+<script src="/webjars/bootstrap/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    $(document).ready(function() {
+        const uploadArea = $('#uploadArea');
+        const fileInput = $('#fileInput');
+
+        // Click to upload
+        uploadArea.on('click', function() {
+            fileInput.click();
+        });
+
+        // Drag and drop functionality
+        uploadArea.on('dragover', function(e) {
+            e.preventDefault();
+            $(this).addClass('dragover');
+        });
+
+        uploadArea.on('dragleave', function(e) {
+            e.preventDefault();
+            $(this).removeClass('dragover');
+        });
+
+        uploadArea.on('drop', function(e) {
+            e.preventDefault();
+            $(this).removeClass('dragover');
+
+            const files = e.originalEvent.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        });
+
+        // File input change
+        fileInput.on('change', function() {
+            if (this.files.length > 0) {
+                handleFileUpload(this.files[0]);
+            }
+        });
+
+        function handleFileUpload(file) {
+            if (file.type !== 'application/pdf') {
+                showAlert('Please select a PDF file.', 'danger');
+                return;
+            }
+
+            if (file.size > 50 * 1024 * 1024) {
+                showAlert('File size must be less than 50MB.', 'danger');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('chunkSize', $('#chunkSize').val());
+            formData.append('chunkOverlap', $('#chunkOverlap').val());
+
+            // Show progress
+            $('#uploadProgress').show();
+            $('.progress-bar').css('width', '0%');
+
+            $.ajax({
+                url: '/api/documents/upload',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                xhr: function() {
+                    const xhr = new window.XMLHttpRequest();
+                    xhr.upload.addEventListener('progress', function(evt) {
+                        if (evt.lengthComputable) {
+                            const percentComplete = (evt.loaded / evt.total) * 100;
+                            $('.progress-bar').css('width', percentComplete + '%');
+                        }
+                    }, false);
+                    return xhr;
+                },
+                success: function(response) {
+                    $('#uploadProgress').hide();
+                    showAlert(`Document "${response.originalFilename}" uploaded successfully!`, 'success');
+
+                    // Refresh page after 2 seconds
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                },
+                error: function(xhr) {
+                    $('#uploadProgress').hide();
+                    let errorMessage = 'Upload failed. Please try again.';
+
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMessage = xhr.responseJSON.message;
+                    }
+
+                    showAlert(errorMessage, 'danger');
+                }
+            });
+        }
+
+        function showAlert(message, type) {
+            const alertHtml = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            $('#uploadResults').html(alertHtml);
+        }
+    });
+</script>
+</body>
+</html>

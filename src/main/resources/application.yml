@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: spring-ai-rag-app
+
+  thymeleaf:
+    cache: false # For development
+    prefix: classpath:/templates/
+    suffix: .html
+    encoding: UTF-8
+
+    web:
+      resources:
+        static-locations: classpath:/static/,classpath:/META-INF/resources/,classpath:/resources/,classpath:/public/
+        cache:
+          period: 3600 # 1 hour cache for static resources
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/rag_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+  ai:
+    ollama:
+      base-url: http://35.226.124.120:11434
+      chat:
+        options:
+          model: mistral:7b-instruct  # Smaller model (~2GB RAM)
+      embedding:
+        options:
+          model: nomic-embed-text  # This one is fine (~500MB)
+
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 768
+        initialize-schema: true
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.example.rag: DEBUG
+    org.springframework.ai: INFO
