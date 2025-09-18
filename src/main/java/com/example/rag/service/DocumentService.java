@@ -2,12 +2,9 @@ package com.example.rag.service;
 
 import com.example.rag.dto.DocumentUploadRequest;
 import com.example.rag.dto.DocumentUploadResponse;
-import com.example.rag.entity.Document;
-import com.example.rag.entity.DocumentChunk;
-import com.example.rag.repository.DocumentChunkRepository;
-import com.example.rag.repository.DocumentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -20,46 +17,27 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class DocumentService {
 
-    private final DocumentRepository documentRepository;
-    private final DocumentChunkRepository documentChunkRepository;
     private final VectorStore vectorStore;
 
     @Transactional
     public DocumentUploadResponse uploadAndProcessDocument(DocumentUploadRequest request) {
         MultipartFile file = request.getFile();
-
         try {
             log.info("Starting document upload: {}", file.getOriginalFilename());
-
             validateFile(file);
-
-            // Create document entity
-            Document document = createDocumentEntity(file);
-            document.setStatus(Document.ProcessingStatus.UPLOADING);
-            document = documentRepository.save(document);
-
-            // Process PDF with Spring AI
-            document.setStatus(Document.ProcessingStatus.PROCESSING);
-            document = documentRepository.save(document);
 
             // Use Spring AI PDF Reader
             byte[] fileBytes = file.getBytes();
             ByteArrayResource resource = new ByteArrayResource(fileBytes);
 
             PagePdfDocumentReader pdfReader = new PagePdfDocumentReader(resource);
-            List<org.springframework.ai.document.Document> documents = pdfReader.get();
-
-            // Clean metadata and extract text safely
-            List<org.springframework.ai.document.Document> cleanedDocuments = cleanDocumentMetadata(documents);
-            String extractedText = extractFullTextSafely(cleanedDocuments);
-            document.setExtractedText(extractedText);
+            List<Document> documents = pdfReader.read();
 
             // Split into chunks
             TokenTextSplitter textSplitter = new TokenTextSplitter(
@@ -67,16 +45,14 @@ public class DocumentService {
                     request.getChunkOverlap(),
                     5, 10000, true
             );
-            List<org.springframework.ai.document.Document> chunks = textSplitter.apply(cleanedDocuments);
+            List<Document> chunks = textSplitter.apply(documents);
 
             // Add metadata to chunks with null-safe handling
             for (int i = 0; i < chunks.size(); i++) {
-                org.springframework.ai.document.Document chunk = chunks.get(i);
+                Document chunk = chunks.get(i);
                 Map<String, Object> metadata = new HashMap<>();
-                metadata.put("filename", document.getFilename());
-                metadata.put("original_filename", document.getOriginalFilename());
+                metadata.put("original_filename", file.getOriginalFilename());
                 metadata.put("chunk_index", i);
-                metadata.put("document_id", document.getId().toString());
                 metadata.put("source", "pdf");
                 metadata.put("page_number", i); // Add page tracking
 
@@ -88,55 +64,20 @@ public class DocumentService {
             // Store in vector database
             vectorStore.add(chunks);
 
-            // Save chunk metadata to database
-            List<DocumentChunk> documentChunks = createDocumentChunks(document, chunks);
-            documentChunkRepository.saveAll(documentChunks);
-
-            // Update status
-            document.setStatus(Document.ProcessingStatus.COMPLETED);
-            document = documentRepository.save(document);
-
-            log.info("Successfully processed document: {} with {} chunks",
-                    document.getFilename(), documentChunks.size());
-
-            return DocumentUploadResponse.builder()
-                    .documentId(document.getId())
-                    .filename(document.getFilename())
-                    .originalFilename(document.getOriginalFilename())
-                    .fileSize(document.getFileSize())
-                    .contentType(document.getContentType())
-                    .status(document.getStatus())
-                    .totalChunks(documentChunks.size())
-                    .uploadedAt(document.getCreatedAt())
-                    .message("Document processed successfully")
-                    .build();
-
         } catch (Exception e) {
-            log.error("Error processing document: {}", file.getOriginalFilename(), e);
-
-            // Update document status to failed
-            try {
-                Document doc = documentRepository.findByFilename(generateUniqueFilename(file.getOriginalFilename()))
-                        .orElse(null);
-                if (doc != null) {
-                    doc.setStatus(Document.ProcessingStatus.FAILED);
-                    documentRepository.save(doc);
-                }
-            } catch (Exception ex) {
-                log.error("Failed to update document status", ex);
-            }
-
             throw new RuntimeException("Failed to process document: " + e.getMessage(), e);
         }
+        return DocumentUploadResponse.builder().message("Document uploaded successfully").build();
     }
+
 
     /**
      * Clean document metadata to remove null values that cause formatting issues
      */
-    private List<org.springframework.ai.document.Document> cleanDocumentMetadata(List<org.springframework.ai.document.Document> documents) {
-        List<org.springframework.ai.document.Document> cleanedDocuments = new ArrayList<>();
+    private List<Document> cleanDocumentMetadata(List<Document> documents) {
+        List<Document> cleanedDocuments = new ArrayList<>();
 
-        for (org.springframework.ai.document.Document doc : documents) {
+        for (Document doc : documents) {
             // Create new metadata map without null values
             Map<String, Object> cleanMetadata = new HashMap<>();
 
@@ -153,7 +94,7 @@ public class DocumentService {
             String rawContent = getRawContentSafely(doc);
 
             // Create new document with cleaned metadata and raw content
-            org.springframework.ai.document.Document cleanedDoc = new org.springframework.ai.document.Document(rawContent, cleanMetadata);
+            Document cleanedDoc = new Document(rawContent, cleanMetadata);
             cleanedDocuments.add(cleanedDoc);
         }
 
@@ -163,10 +104,10 @@ public class DocumentService {
     /**
      * Extract raw content from document without triggering formatter
      */
-    private String getRawContentSafely(org.springframework.ai.document.Document doc) {
+    private String getRawContentSafely(Document doc) {
         try {
             // Try to access the private content field directly using reflection
-            java.lang.reflect.Field contentField = org.springframework.ai.document.Document.class.getDeclaredField("content");
+            java.lang.reflect.Field contentField = Document.class.getDeclaredField("content");
             contentField.setAccessible(true);
             Object content = contentField.get(doc);
             return content != null ? content.toString() : "";
@@ -176,7 +117,7 @@ public class DocumentService {
             // Fallback: try to get content through toString or other means
             try {
                 // Create a temporary document with empty metadata to avoid formatter issues
-                org.springframework.ai.document.Document tempDoc = new org.springframework.ai.document.Document(doc.toString(), new HashMap<>());
+                Document tempDoc = new Document(doc.toString(), new HashMap<>());
                 return tempDoc.toString();
             } catch (Exception ex) {
                 log.error("Failed to extract content safely", ex);
@@ -188,9 +129,9 @@ public class DocumentService {
     /**
      * Safely extract full text without using getFormattedContent() that causes issues
      */
-    private String extractFullTextSafely(List<org.springframework.ai.document.Document> documents) {
+    private String extractFullTextSafely(List<Document> documents) {
         StringBuilder fullText = new StringBuilder();
-        for (org.springframework.ai.document.Document doc : documents) {
+        for (Document doc : documents) {
             // Use our safe content extraction method
             String content = getRawContentSafely(doc);
             if (content != null && !content.trim().isEmpty()) {
@@ -214,60 +155,4 @@ public class DocumentService {
         }
     }
 
-    private Document createDocumentEntity(MultipartFile file) {
-        String uniqueFilename = generateUniqueFilename(file.getOriginalFilename());
-
-        return Document.builder()
-                .filename(uniqueFilename)
-                .originalFilename(file.getOriginalFilename())
-                .contentType(file.getContentType())
-                .fileSize(file.getSize())
-                .status(Document.ProcessingStatus.UPLOADING)
-                .build();
-    }
-
-    private String generateUniqueFilename(String originalFilename) {
-        String uuid = UUID.randomUUID().toString().substring(0, 8);
-        return uuid + "_" + originalFilename;
-    }
-
-    private List<DocumentChunk> createDocumentChunks(Document document,
-                                                     List<org.springframework.ai.document.Document> aiDocuments) {
-        List<DocumentChunk> chunks = new ArrayList<>();
-
-        for (int i = 0; i < aiDocuments.size(); i++) {
-            org.springframework.ai.document.Document aiDoc = aiDocuments.get(i);
-
-            // Use safe content extraction for chunks too
-            String chunkContent = getRawContentSafely(aiDoc);
-
-            DocumentChunk chunk = DocumentChunk.builder()
-                    .document(document)
-                    .content(chunkContent)
-                    .chunkIndex(i)
-                    .vectorStoreId(aiDoc.getId())
-                    .build();
-
-            chunks.add(chunk);
-        }
-
-        return chunks;
-    }
-
-    public List<Document> getAllDocuments() {
-        return documentRepository.findAllProcessedDocuments();
-    }
-
-    public Document getDocumentById(Long id) {
-        return documentRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Document not found with id: " + id));
-    }
-
-    @Transactional
-    public void deleteDocument(Long id) {
-        Document document = getDocumentById(id);
-        documentChunkRepository.deleteByDocumentId(id);
-        documentRepository.delete(document);
-        log.info("Deleted document: {}", document.getFilename());
-    }
 }

@@ -35,22 +35,17 @@ public class RagService {
 
             // Retrieve relevant documents
             List<Document> relevantDocs = vectorStore.similaritySearch(searchRequest);
-
-            if (relevantDocs.isEmpty()) {
-                return QueryResponse.builder()
-                        .answer("I couldn't find any relevant information to answer your question.")
-                        .query(request.getQuery())
-                        .sources(List.of())
-                        .processingTimeMs(System.currentTimeMillis() - startTime)
-                        .totalSources(0)
-                        .build();
+            log.info("Retrieved {} relevant documents", relevantDocs.size());
+            String context = "";
+            String prompt = "";
+            if (!relevantDocs.isEmpty()) {
+                // Build context from retrieved documents
+                context = buildContext(relevantDocs);
             }
 
-            // Build context from retrieved documents
-            String context = buildContext(relevantDocs);
-
             // Generate answer using ChatClient
-            String prompt = buildPrompt(request.getQuery(), context);
+            prompt = buildPrompt(request.getQuery(), context);
+            log.info("Constructed prompt: {}", prompt);
             String answer = chatClient.prompt(prompt).call().content();
 
             // Build response with sources
@@ -83,7 +78,7 @@ public class RagService {
     private String buildPrompt(String query, String context) {
         return String.format("""
                 You are a helpful AI assistant. Answer the user's question based on the provided context.
-                
+                If the context is empty see if you can answer based on your own knowledge or say you don't know.
                 Context:
                 %s
                 
@@ -94,9 +89,12 @@ public class RagService {
                 - If the context doesn't contain enough information, say so
                 - Be concise but thorough
                 - Use a professional and helpful tone
+                - Do not let user know we are using retrieval augmented generation. Just sound natural as if you know the answer.
                 
                 Answer:""", context, query);
     }
+
+
 
     private List<QueryResponse.RetrievedDocument> buildSources(List<Document> documents) {
         return documents.stream()
